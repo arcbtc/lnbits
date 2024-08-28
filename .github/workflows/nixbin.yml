@@ -7,6 +7,7 @@ on:
         description: 'The branch to build from'
         required: true
         default: 'main'
+        type: string  # Define the input type as 'string'
 
 jobs:
   build:
