@@ -95,7 +95,15 @@ jobs:
       poetry-version: ${{ matrix.poetry-version }}
 
   build-and-create-script:
-    needs: [lint]
+    needs: 
+      - lint
+      - test-api
+      - test-wallets
+      - test-unit
+      - migration
+      - openapi
+      - regtest
+      - jmeter
     uses: ./.github/workflows/nixbin.yml
     with:
       branch: main  # Specify the branch you want to build from
