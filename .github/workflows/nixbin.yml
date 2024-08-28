@@ -1,12 +1,12 @@
 name: Build Nix Binary and Create Bash Script
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+  workflow_call:
+    inputs:
+      branch:
+        description: 'The branch to build from'
+        required: true
+        default: 'main'
 
 jobs:
   build:
@@ -15,6 +15,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
+      with:
+        ref: ${{ inputs.branch }}
 
     - name: Install Nix
       run: |
@@ -43,6 +45,3 @@ jobs:
         echo "mkdir -p data" >> $GITHUB_WORKSPACE/run_nix_lnbits.sh
         echo "\$(dirname \"\$0\")/lnbits/result/bin/lnbits --port 9000 --host 0.0.0.0" >> $GITHUB_WORKSPACE/run_nix_lnbits.sh
         chmod +x $GITHUB_WORKSPACE/run_nix_lnbits.sh
-
-    - name: Ensure script is in root
-      run: ls -la $GITHUB_WORKSPACE/
