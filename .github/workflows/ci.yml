@@ -93,3 +93,7 @@ jobs:
     with:
       python-version: ${{ matrix.python-version }}
       poetry-version: ${{ matrix.poetry-version }}
+  
+  build-and-create-script:
+    needs: [lint]
+    uses: ./.github/workflows/nixbin.yml
