@@ -98,12 +98,16 @@ async def api_install_extension(data: CreateExtension):
         ext_info.clean_extension_files()
         detail = (
             str(exc)
-            if isinstance(exc, AssertionError)
+            if isinstance(exc, (AssertionError, ValueError))
             else f"Failed to install extension '{ext_info.id}'."
             f"({ext_info.installed_version})."
         )
         raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            status_code=(
+                HTTPStatus.BAD_REQUEST
+                if isinstance(exc, (AssertionError, ValueError))
+                else HTTPStatus.INTERNAL_SERVER_ERROR
+            ),
             detail=detail,
         ) from exc
 
@@ -288,7 +292,6 @@ async def api_deactivate_extension(ext_id: str) -> SimpleStatus:
 
 @extension_router.delete("/{ext_id}", dependencies=[Depends(check_admin)])
 async def api_uninstall_extension(ext_id: str) -> SimpleStatus:
-
     extension = await get_installed_extension(ext_id)
     if not extension:
         raise HTTPException(
@@ -563,6 +566,7 @@ async def extensions(account_id: AccountId = Depends(check_account_id_exists)):
             "shortDescription": ext.short_description,
             "stars": ext.stars,
             "isFeatured": ext.meta.featured if ext.meta else False,
+            "categories": ext.meta.categories if ext.meta else [],
             "dependencies": ext.meta.dependencies if ext.meta else "",
             "isInstalled": ext.id in installed_exts_ids,
             "hasDatabaseTables": next(

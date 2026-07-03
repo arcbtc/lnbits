@@ -774,7 +774,13 @@ include('components/lnbits-error.vue') %}
           v-model="password"
           name="password"
           :label="$t('password') + ' *'"
-          type="password"
+          :type="showPwd ? 'text' : 'password'"
+          ><template v-slot:append>
+            <q-icon
+              :name="showPwd ? 'visibility' : 'visibility_off'"
+              class="cursor-pointer"
+              @click="showPwd = !showPwd"
+            /> </template
         ></q-input>
         <div class="row justify-end">
           <q-btn
@@ -803,16 +809,28 @@ include('components/lnbits-error.vue') %}
           filled
           v-model="password"
           :label="$t('password') + ' *'"
-          type="password"
+          :type="showPwd ? 'text' : 'password'"
           :rules="[val => !val || val.length >= 8 || $t('invalid_password')]"
+          ><template v-slot:append>
+            <q-icon
+              :name="showPwd ? 'visibility' : 'visibility_off'"
+              class="cursor-pointer"
+              @click="showPwd = !showPwd"
+            /> </template
         ></q-input>
         <q-input
           dense
           filled
           v-model="passwordRepeat"
           :label="$t('password_repeat') + ' *'"
-          type="password"
+          :type="showPwdRepeat ? 'text' : 'password'"
           :rules="[val => !val || val.length >= 8 || $t('invalid_password')]"
+          ><template v-slot:append>
+            <q-icon
+              :name="showPwdRepeat ? 'visibility' : 'visibility_off'"
+              class="cursor-pointer"
+              @click="showPwdRepeat = !showPwdRepeat"
+            /> </template
         ></q-input>
         <div
           v-if="confirmationMethodsCount > 1"
@@ -925,16 +943,28 @@ include('components/lnbits-error.vue') %}
           filled
           v-model="password"
           :label="$t('password') + ' *'"
-          type="password"
+          :type="showPwd ? 'text' : 'password'"
           :rules="[val => !val || val.length >= 8 || $t('invalid_password')]"
+          ><template v-slot:append>
+            <q-icon
+              :name="showPwd ? 'visibility' : 'visibility_off'"
+              class="cursor-pointer"
+              @click="showPwd = !showPwd"
+            /> </template
         ></q-input>
         <q-input
           dense
           filled
           v-model="passwordRepeat"
           :label="$t('password_repeat') + ' *'"
-          type="password"
+          :type="showPwdRepeat ? 'text' : 'password'"
           :rules="[val => !val || val.length >= 8 || $t('invalid_password')]"
+          ><template v-slot:append>
+            <q-icon
+              :name="showPwdRepeat ? 'visibility' : 'visibility_off'"
+              class="cursor-pointer"
+              @click="showPwdRepeat = !showPwdRepeat"
+            /> </template
         ></q-input>
         <div class="row justify-end">
           <q-btn
@@ -1045,6 +1075,34 @@ include('components/lnbits-error.vue') %}
             v-text="
               $t('signin_with_custom_org', {
                 custom_org: g.settings.keycloakOrg || 'Keycloak'
+              })
+            "
+          ></span>
+        </div>
+      </q-btn>
+      <q-btn
+        v-if="authMethods.includes('oidc-auth')"
+        href="/api/v1/auth/oidc"
+        type="a"
+        outline
+        no-caps
+        color="grey"
+        class="btn-fixed-width"
+      >
+        <q-avatar size="32px" class="q-mr-md">
+          <q-img
+            :src="
+              g.settings.oidcIcon
+                ? g.settings.oidcIcon
+                : utils.url_for('lnbits/static/images/generic-oidc-logo.svg')
+            "
+          ></q-img>
+        </q-avatar>
+        <div>
+          <span
+            v-text="
+              $t('signin_with_custom_org', {
+                custom_org: g.settings.oidcOrg || 'OIDC'
               })
             "
           ></span>

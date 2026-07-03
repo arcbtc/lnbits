@@ -35,7 +35,7 @@ if settings.lnbits_database_url:
     else:
         if not database_uri.startswith("postgres://"):
             raise ValueError(
-                "Please use the 'postgres://...' " "format for the database URL."
+                "Please use the 'postgres://...' format for the database URL."
             )
         DB_TYPE = POSTGRES
 
@@ -560,7 +560,9 @@ class Filters(BaseModel, Generic[TFilterModel]):
 
     def pagination(self) -> str:
         stmt = ""
-        self.limit = self.limit or 10
+        if self.limit == 0:
+            self.limit = 1000
+        self.limit = 10 if self.limit is None else self.limit
         stmt += f"LIMIT {min(1000, self.limit)} "
         if self.offset:
             stmt += f"OFFSET {self.offset}"
@@ -612,6 +614,12 @@ class Filters(BaseModel, Generic[TFilterModel]):
         self.table_name = table_name
         for page_filter in self.filters:
             page_filter.table_name = table_name
+
+    def get_filter_by_field(self, field: str) -> Filter[TFilterModel] | None:
+        return next((f for f in self.filters if f.field == field), None)
+
+    def remove_filter_by_field(self, field: str) -> None:
+        self.filters = [f for f in self.filters if f.field != field]
 
 
 class DbJsonEncoder(json.JSONEncoder):

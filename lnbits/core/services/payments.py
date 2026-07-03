@@ -19,7 +19,6 @@ from lnbits.exceptions import InvoiceError, PaymentError, UnsupportedError
 from lnbits.fiat import get_fiat_provider
 from lnbits.helpers import check_callback_url
 from lnbits.settings import settings
-from lnbits.tasks import create_task, internal_invoice_queue_put
 from lnbits.utils.crypto import fake_privkey, random_secret_and_hash, verify_preimage
 from lnbits.utils.exchange_rates import fiat_amount_as_satoshis, satoshis_amount_as_fiat
 from lnbits.wallets import fake_wallet, get_funding_source
@@ -64,6 +63,7 @@ async def pay_invoice(
     description: str = "",
     tag: str = "",
     labels: list[str] | None = None,
+    external_id: str | None = None,
     conn: Connection | None = None,
 ) -> Payment:
     if settings.lnbits_only_allow_incoming_payments:
@@ -97,6 +97,7 @@ async def pay_invoice(
             memo=description or invoice.description or "",
             extra=extra,
             labels=labels,
+            external_id=external_id,
         )
 
     async with db.reuse_conn(conn) if conn else db.connect() as new_conn:
@@ -169,15 +170,15 @@ async def create_fiat_invoice(
 
     internal_payment.fiat_provider = fiat_provider_name
     internal_payment.extra["fiat_checking_id"] = fiat_invoice.checking_id
-    # todo: move to payent
+    # TODO: move to payment
     internal_payment.extra["fiat_payment_request"] = fiat_invoice.payment_request
     new_checking_id = (
         f"fiat_{fiat_provider_name}_"
         f"{fiat_invoice.checking_id or internal_payment.checking_id}"
     )
-    await update_payment(internal_payment, new_checking_id, conn=conn)
-    internal_payment.checking_id = new_checking_id
-
+    internal_payment = await update_payment(
+        internal_payment, new_checking_id, conn=conn
+    )
     return internal_payment
 
 
@@ -217,6 +218,7 @@ async def create_wallet_invoice(wallet_id: str, data: CreateInvoice) -> Payment:
             internal=data.internal,
             payment_hash=data.payment_hash,
             labels=data.labels,
+            external_id=data.external_id,
             conn=conn,
         )
 
@@ -258,6 +260,7 @@ async def create_invoice(
     internal: bool | None = False,
     payment_hash: str | None = None,
     labels: list[str] | None = None,
+    external_id: str | None = None,
     conn: Connection | None = None,
 ) -> Payment:
     if not amount > 0:
@@ -342,6 +345,7 @@ async def create_invoice(
         webhook=webhook,
         fee=invoice_response.fee_msat or 0,
         labels=labels,
+        external_id=external_id,
     )
 
     payment = await create_payment(
@@ -369,7 +373,7 @@ async def update_pending_payment(
     status = await check_payment_status(payment)
     if status.failed:
         payment.status = PaymentState.FAILED
-        await update_payment(payment, conn=conn)
+        payment = await update_payment(payment, conn=conn)
     elif status.success:
         payment = await update_payment_success_status(payment, status, conn=conn)
     return payment
@@ -509,6 +513,8 @@ async def update_wallet_balance(
         )
         payment.status = PaymentState.SUCCESS
         await update_payment(payment, conn=conn)
+        from lnbits.tasks import internal_invoice_queue_put
+
         await internal_invoice_queue_put(payment.checking_id)
 
 
@@ -623,18 +629,14 @@ async def check_transaction_status(
     return await check_payment_status(payment)
 
 
-async def check_payment_status(
-    payment: Payment, skip_internal_payment_notifications: bool | None = False
-) -> PaymentStatus:
+async def check_payment_status(payment: Payment) -> PaymentStatus:
     if payment.is_internal:
         if payment.success:
             return PaymentSuccessStatus()
         if payment.failed:
             return PaymentFailedStatus()
         if payment.is_in and payment.fiat_provider:
-            fiat_status = await check_fiat_status(
-                payment, skip_internal_payment_notifications
-            )
+            fiat_status = await check_fiat_status(payment)
             return PaymentStatus(paid=fiat_status.paid)
         return PaymentPendingStatus()
     funding_source = get_funding_source()
@@ -776,9 +778,14 @@ async def _pay_internal_invoice(
     await update_payment(internal_payment, conn=conn)
     logger.success(f"internal payment successful {internal_payment.checking_id}")
 
-    await _send_payment_notification_in_background(wallet.id, payment, conn=conn)
+    await _send_payment_notification_in_background(
+        wallet.id, payment, conn=conn
+    )  # notify the sender
+    await _send_payment_notification_in_background(
+        internal_payment.wallet_id, internal_payment, conn=conn
+    )  # notify the receiver
 
-    # notify receiver asynchronously
+    # notify receiver asynchronously (extension listeners)
     from lnbits.tasks import internal_invoice_queue
 
     logger.debug(f"enqueuing internal invoice {internal_payment.checking_id}")
@@ -818,6 +825,8 @@ async def _pay_external_invoice(
     )
 
     fee_reserve_msat = fee_reserve(amount_msat, internal=False)
+
+    from lnbits.tasks import create_task
 
     task = create_task(
         _fundingsource_pay_invoice(checking_id, payment.bolt11, fee_reserve_msat)
@@ -867,7 +876,7 @@ async def update_payment_success_status(
         payment.status = PaymentState.SUCCESS
         payment.fee = -(abs(status.fee_msat or 0) + abs(service_fee_msat))
         payment.preimage = payment.preimage or status.preimage
-        await update_payment(payment, conn=conn)
+        payment = await update_payment(payment, conn=conn)
     return payment
 
 
@@ -1068,3 +1077,31 @@ async def _send_payment_notification_in_background(
     if not wallet:
         raise PaymentError(f"Could not fetch wallet '{wallet_id}'.", status="failed")
     send_payment_notification_in_background(wallet, payment)
+
+
+async def update_invoice_from_paid_invoices_stream(checking_id: str) -> Payment | None:
+    """
+    Takes a checking_id of an incoming payment from paid_invoices_stream()
+    Checks its status, updates its status and returns it.
+    returns None if no incoming payment was found or the status is not successful
+    """
+    payment = await get_standalone_payment(checking_id, incoming=True)
+    if not payment:
+        logger.warning(f"No incoming payment found for '{checking_id}'.")
+        return None
+
+    status = await check_payment_status(payment)
+
+    if not status.success:
+        logger.error(
+            "Unexpected status response from paid_invoices_stream. Skipping update."
+        )
+        return None
+
+    payment.fee = status.fee_msat or payment.fee
+    # only overwrite preimage if status.preimage provides it
+    payment.preimage = status.preimage or payment.preimage
+    payment.status = PaymentState.SUCCESS
+    payment = await update_payment(payment)
+
+    return payment

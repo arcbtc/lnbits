@@ -149,14 +149,12 @@ async def get_payments_paginated(  # noqa: C901
             f"(status = '{PaymentState.SUCCESS}' OR status = '{PaymentState.PENDING}')"
         )
     elif complete:
-        clause.append(
-            f"""
+        clause.append(f"""
             (
                 status = '{PaymentState.SUCCESS}'
                 OR (amount < 0 AND status = '{PaymentState.PENDING}')
             )
-            """
-        )
+            """)
     elif pending:
         clause.append(f"status = '{PaymentState.PENDING}'")
     elif failed:
@@ -294,6 +292,7 @@ async def create_payment(
         tag=extra.get("tag", None),
         extra=extra,
         labels=data.labels or [],
+        external_id=data.external_id,
     )
 
     await (conn or db).insert("apipayments", payment)
@@ -307,7 +306,7 @@ async def update_payment_checking_id(
     await (conn or db).execute(
         f"""
             UPDATE apipayments
-            SET checking_id = :new_id, updated_at = {db.timestamp_placeholder('now')}
+            SET checking_id = :new_id, updated_at = {db.timestamp_placeholder("now")}
             WHERE checking_id = :old_id
         """,  # noqa: S608
         {
@@ -322,13 +321,15 @@ async def update_payment(
     payment: Payment,
     new_checking_id: str | None = None,
     conn: Connection | None = None,
-) -> None:
+) -> Payment:
     payment.updated_at = datetime.now(timezone.utc)
     await (conn or db).update(
         "apipayments", payment, "WHERE checking_id = :checking_id"
     )
     if new_checking_id and new_checking_id != payment.checking_id:
         await update_payment_checking_id(payment.checking_id, new_checking_id, conn)
+        payment.checking_id = new_checking_id
+    return payment
 
 
 async def get_payments_history(
@@ -346,14 +347,12 @@ async def get_payments_history(
         "wallet_id": wallet_id,
     }
     # count outgoing payments if they are still pending
-    where = [
-        f"""
+    where = [f"""
         wallet_id = :wallet_id AND (
             status = '{PaymentState.SUCCESS}'
             OR (amount < 0 AND status = '{PaymentState.PENDING}')
         )
-        """
-    ]
+        """]
     clause = filters.where(where)
     transactions: list[dict] = await db.fetchall(
         # This query is safe from SQL injection:
@@ -402,7 +401,6 @@ async def get_payment_count_stats(
     user_id: str | None = None,
     conn: Connection | None = None,
 ) -> list[PaymentCountStat]:
-
     if not filters:
         filters = Filters()
     extra_stmts = []
@@ -435,7 +433,6 @@ async def get_daily_stats(
     user_id: str | None = None,
     conn: Connection | None = None,
 ) -> tuple[list[PaymentDailyStats], list[PaymentDailyStats]]:
-
     if not filters:
         filters = Filters()
 
@@ -485,7 +482,6 @@ async def get_wallets_stats(
     user_id: str | None = None,
     conn: Connection | None = None,
 ) -> list[PaymentWalletStats]:
-
     if not filters:
         filters = Filters()
 

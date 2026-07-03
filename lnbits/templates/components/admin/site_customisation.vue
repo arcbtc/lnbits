@@ -251,10 +251,27 @@
             type="text"
             v-model="formData.lnbits_default_bgimage"
             label="Background Image"
-            @update:model-value="applyGlobalBgimage"
             hint="This must be a trusted source. It can change the content and it can log your IP address."
           >
+            <template v-slot:append>
+              <q-btn
+                dense
+                flat
+                round
+                icon="upload"
+                @click="$refs.adminBackgroundImageInput.click()"
+              >
+                <q-tooltip>Upload background image</q-tooltip>
+              </q-btn>
+            </template>
           </q-input>
+          <input
+            type="file"
+            ref="adminBackgroundImageInput"
+            accept="image/*"
+            style="display: none"
+            @change="onBackgroundImageInput"
+          />
         </div>
       </div>
       <div class="row q-col-gutter-md q-mb-md">
@@ -300,6 +317,15 @@
             v-model="formData.lnbits_default_card_shadow"
             color="primary"
             :label="$t('card_shadow')"
+          >
+          </q-toggle>
+        </div>
+        <div class="col-12 col-sm-6 col-lg-2">
+          <q-toggle
+            type="bool"
+            v-model="formData.lnbits_default_burger_menu_background"
+            color="primary"
+            :label="$t('burger_menu_background')"
           >
           </q-toggle>
         </div>
