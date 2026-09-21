@@ -6,6 +6,7 @@ import plistlib
 import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import tomllib
@@ -40,6 +41,51 @@ def finalize_app(app):
     plist.write_bytes(plistlib.dumps(info))
 
 
+def create_uncompressed(staging, output, runner):
+    from macos.common import ReleaseError
+
+    for attempt in range(3):
+        try:
+            runner.run(
+                "Create uncompressed DMG",
+                "/usr/bin/hdiutil",
+                "create",
+                "-volname",
+                "LNbits",
+                "-srcfolder",
+                staging,
+                "-fs",
+                "HFS+",
+                "-format",
+                "UDRW",
+                "-nospotlight",
+                "-verbose",
+                "-puppetstrings",
+                "-ov",
+                output,
+                timeout=1200,
+                log_output=True,
+            )
+            return
+        except ReleaseError as error:
+            # hdiutil can fail while finishing its temporary volume even after
+            # copying succeeds. Retry only this reported busy error, not timeouts.
+            message = str(error)
+            if (
+                attempt == 2
+                or not message.startswith("Create uncompressed DMG: exit ")
+                or "hdiutil: create failed - Resource busy" not in message
+            ):
+                raise
+            delay = 5 * (attempt + 1)
+            print(
+                f"macOS: DMG volume is busy; retrying creation in {delay}s "
+                f"(attempt {attempt + 2}/3)",
+                flush=True,
+            )
+            time.sleep(delay)
+
+
 def create(app, output, runner, *, signed):
     with tempfile.TemporaryDirectory(prefix="lnbits-dmg-") as directory:
         workspace = Path(directory)
@@ -65,26 +111,7 @@ def create(app, output, runner, *, signed):
         # Separate filesystem creation from compression on slower Intel runners.
         # The intermediate image is outside the source folder and is never signed
         # or notarized. Conversion finishes before the final DMG release sequence.
-        runner.run(
-            "Create uncompressed DMG",
-            "/usr/bin/hdiutil",
-            "create",
-            "-volname",
-            "LNbits",
-            "-srcfolder",
-            staging,
-            "-fs",
-            "HFS+",
-            "-format",
-            "UDRW",
-            "-nospotlight",
-            "-verbose",
-            "-puppetstrings",
-            "-ov",
-            uncompressed,
-            timeout=1200,
-            log_output=True,
-        )
+        create_uncompressed(staging, uncompressed, runner)
         runner.run(
             "Compress final DMG",
             "/usr/bin/hdiutil",
