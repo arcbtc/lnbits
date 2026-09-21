@@ -291,6 +291,10 @@ when credentials are supplied.
   and reports staging size and available disk space. Long operations print a
   heartbeat every 30 seconds and retain sanitized tool output on failure. A timeout
   stops the tool's process group and fails the build; it never uploads a partial image.
+- **DMG creation reports `Resource busy`:** `hdiutil` can fail while finishing its
+  temporary volume after copying the app. The builder retries this specific error
+  up to two times, waiting 5 then 10 seconds. Other errors and timeouts fail
+  immediately. If all three attempts fail, no DMG or checksum is published.
 
 Run `make test-desktop` for mocked Apple-tool tests, identity validation,
 notarization/signing order, failure and cleanup gates, checksum generation,

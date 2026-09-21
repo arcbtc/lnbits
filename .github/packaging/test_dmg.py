@@ -14,6 +14,82 @@ from macos.common import ReleaseError
 
 
 class DmgTests(unittest.TestCase):
+    def test_busy_image_creation_retries_before_compression(self):
+        for busy_attempts in (1, 2, 3):
+            with (
+                self.subTest(busy_attempts=busy_attempts),
+                tempfile.TemporaryDirectory() as folder,
+                patch("macos.dmg.time.sleep") as sleep,
+            ):
+                workspace = []
+                attempts = []
+                busy = ReleaseError(
+                    "Create uncompressed DMG: exit 1. "
+                    "hdiutil: create failed - Resource busy"
+                )
+
+                def run(
+                    operation,
+                    *args,
+                    workspace=workspace,
+                    attempts=attempts,
+                    busy_attempts=busy_attempts,
+                    busy=busy,
+                    **kwargs,
+                ):
+                    if operation == "Create uncompressed DMG":
+                        self.assertIn("-ov", args)
+                        intermediate = Path(args[-1])
+                        workspace.append(intermediate.parent)
+                        attempts.append(intermediate)
+                        # A failed create may leave a partial image behind.
+                        intermediate.write_bytes(b"partial image")
+                        if len(attempts) <= busy_attempts:
+                            raise busy
+                        intermediate.write_bytes(b"complete image")
+                    elif operation == "Compress final DMG":
+                        self.assertEqual(Path(args[2]).read_bytes(), b"complete image")
+
+                runner = Mock()
+                runner.run.side_effect = run
+                if busy_attempts == 3:
+                    with self.assertRaises(ReleaseError) as caught:
+                        dmg.create(
+                            Path("app"), Path(folder) / "out.dmg", runner, signed=False
+                        )
+                    self.assertIs(caught.exception, busy)
+                else:
+                    dmg.create(
+                        Path("app"), Path(folder) / "out.dmg", runner, signed=False
+                    )
+                self.assertEqual(len(attempts), min(busy_attempts + 1, 3))
+                self.assertEqual(len(set(attempts)), 1)
+                self.assertEqual(
+                    [call.args[0] for call in sleep.call_args_list],
+                    [5, 10][: min(busy_attempts, 2)],
+                )
+                operations = [call.args[0] for call in runner.run.call_args_list]
+                self.assertEqual(
+                    operations.count("Compress final DMG"), int(busy_attempts < 3)
+                )
+                self.assertTrue(all(not path.exists() for path in workspace))
+
+    def test_other_creation_errors_are_not_retried(self):
+        for message in (
+            "Create uncompressed DMG: exit 1. No space left on device",
+            "Create uncompressed DMG: timed out. "
+            "hdiutil: create failed - Resource busy",
+        ):
+            with self.subTest(message=message), patch("macos.dmg.time.sleep") as sleep:
+                error = ReleaseError(message)
+                runner = Mock()
+                runner.run.side_effect = error
+                with self.assertRaises(ReleaseError) as caught:
+                    dmg.create_uncompressed(Path("contents"), Path("out.dmg"), runner)
+                self.assertIs(caught.exception, error)
+                runner.run.assert_called_once()
+                sleep.assert_not_called()
+
     def test_staging_preserves_app_and_verifies_before_publishing_checksum(self):
         for fail_verification in (False, True):
             with (
